@@ -376,15 +376,10 @@ export class AccountsStore extends TypedBaseStore<ReadonlyArray<Account>> {
         )
         accountsWithTokens.push(loaded)
         this.credentials.restore(loaded, credential)
-      } catch {
-        log.error('Unable to read GitHub credentials from secure storage.')
-        this.emitError(
-          new Error(
-            'Unable to read GitHub credentials from secure storage. Please sign in again.'
-          )
-        )
-        accountsWithTokens.push(accountWithoutToken)
-        this.credentials.restore(accountWithoutToken, null)
+      } catch (e) {
+        log.error(`Error getting token for '${key}'. Skipping.`, e)
+
+        this.emitError(e)
       }
     }
 
