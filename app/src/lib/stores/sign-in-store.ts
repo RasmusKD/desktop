@@ -236,9 +236,7 @@ export class SignInStore extends TypedBaseStore<SignInState | null> {
       this.reset()
     }
 
-    const existingAccount = this.accounts.find(
-      a => isDotComAccount(a) && a.token !== ''
-    )
+    const existingAccount = this.accounts.find(isDotComAccount)
 
     if (existingAccount) {
       this.setState({
@@ -488,7 +486,7 @@ export class SignInStore extends TypedBaseStore<SignInState | null> {
 
     const existingAccount = this.accounts.find(x => x.endpoint === endpoint)
 
-    if (existingAccount && existingAccount.token !== '') {
+    if (existingAccount) {
       this.setState({
         kind: SignInStep.ExistingAccountWarning,
         endpoint,
