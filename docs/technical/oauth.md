@@ -71,10 +71,9 @@ Failure to delete secure storage is reported without discarding the credential
 needed for remote revocation.
 
 API clients resolve credentials for every request, including clients created
-before rotation. Git and Git LFS resolve credentials before delivery. Git clients
-advertising `authtype` receive ephemeral Basic credentials. Older clients retain
-username/password output; Desktop's trampoline disables other credential helpers
-for its Git operations, so it does not populate external credential caches.
+before rotation. Git and Git LFS receive a freshly resolved token as their
+username/password; Desktop's trampoline disables other credential helpers for its
+Git operations, so it does not populate external credential caches.
 Private images use bounded, sender-checked IPC. Copilot sessions use the SDK's
 token-provider callback with its longer, one-hour preflight margin; only access
 tokens and remaining lifetimes cross that boundary. No lifetime is invented when
