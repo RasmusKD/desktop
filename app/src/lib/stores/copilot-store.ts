@@ -253,14 +253,20 @@ export function createCopilotTokenProvider(
         'Copilot requested credentials for an unexpected GitHub host.'
       )
     }
-    // The SDK renews an hour before expiry; leave room for IPC transit as well.
+    // The SDK only asks for a new token once `expiresIn` says less than an
+    // hour remains; it doesn't ask again when a token is rejected. It
+    // therefore rejects tokens with an hour or less left, failing the
+    // session. Renew with a margin that also covers IPC transit.
     const fresh = await accountsStore.getAccountWithFreshToken(
       account,
       61 * 60 * 1000
     )
+    // A refreshable token without a known expiry can't be given a safe
+    // lifetime: guessing too long leaves the SDK using a dead token.
     const expiresAt = accountsStore.getTokenExpiration(fresh)
     const expiresIn =
       expiresAt === undefined ? 0 : Math.floor((expiresAt - Date.now()) / 1000)
+    // Fail here with a clear message instead of in the SDK.
     if (expiresIn <= 3600) {
       throw new Error(
         'GitHub returned credentials without enough lifetime for a Copilot session.'
