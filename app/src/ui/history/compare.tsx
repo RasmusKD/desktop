@@ -99,6 +99,10 @@ const LineStatsDelayMs = 100
 /** Rows above and below the viewport that get line stats too. */
 const LineStatsOverscan = 15
 
+/** Rows past the overscan loaded ahead of time, below and above the view. */
+const LineStatsPrefetchBelow = 100
+const LineStatsPrefetchAbove = 30
+
 /** The rows assumed visible until the list first reports its viewport. */
 const InitialVisibleRows = 30
 
@@ -232,6 +236,7 @@ export class CompareSidebar extends React.Component<
     return (
       <div id="compare-view" role="tabpanel" aria-labelledby="history-tab">
         <div className="compare-form search-form">
+          {branchMode ? this.renderBranchBox() : this.renderCommitSearchBox()}
           <Button
             className="search-mode-toggle"
             size="small"
@@ -251,7 +256,6 @@ export class CompareSidebar extends React.Component<
               symbol={branchMode ? octicons.gitBranch : octicons.gitCommit}
             />
           </Button>
-          {branchMode ? this.renderBranchBox() : this.renderCommitSearchBox()}
         </div>
 
         {showBranchList ? this.renderFilterList() : this.renderCommits()}
@@ -428,11 +432,21 @@ export class CompareSidebar extends React.Component<
       if (!this.props.showCommitLineStats) {
         return
       }
+      // One git process streams in this order: the rows on screen, then the
+      // rows below (where scrolling usually goes), then the rows above. The
+      // next request skips whatever this one finished before it was cut off.
       const { start, end } = this.visibleRows
-      const shas = this.getDisplayedCommitSHAs(this.props, this.state).slice(
-        Math.max(0, start - LineStatsOverscan),
-        end + LineStatsOverscan + 1
-      )
+      const all = this.getDisplayedCommitSHAs(this.props, this.state)
+      const windowStart = Math.max(0, start - LineStatsOverscan)
+      const windowEnd = end + LineStatsOverscan + 1
+      const shas = [
+        ...all.slice(windowStart, windowEnd),
+        ...all.slice(windowEnd, windowEnd + LineStatsPrefetchBelow),
+        ...all.slice(
+          Math.max(0, windowStart - LineStatsPrefetchAbove),
+          windowStart
+        ),
+      ]
       if (shas.length > 0) {
         this.props.dispatcher.loadCommitLineStats(this.props.repository, shas)
       }
