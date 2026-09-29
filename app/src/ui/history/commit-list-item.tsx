@@ -50,6 +50,7 @@ interface ICommitProps {
   readonly unpushedIndicatorTitle?: string
   readonly accounts: ReadonlyArray<Account>
   readonly preferAbsoluteDates: boolean
+  readonly showLineStats: boolean
 }
 
 interface ICommitListItemState {
@@ -168,7 +169,7 @@ export class CommitListItem extends React.PureComponent<
               <div className="byline">
                 <CommitAttribution avatarUsers={this.state.avatarUsers} />
                 {renderRelativeTime(date, this.props.preferAbsoluteDates)}
-                {renderLineStats(commit)}
+                {this.props.showLineStats && renderLineStats(commit)}
               </div>
             </div>
           </div>

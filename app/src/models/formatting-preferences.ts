@@ -350,3 +350,17 @@ export function getPreferAbsoluteDates(): boolean {
 export function setPreferAbsoluteDates(value: boolean): void {
   localStorage.setItem(preferAbsoluteDatesKey, value ? '1' : '0')
 }
+
+const showCommitLineStatsKey = 'showCommitLineStats'
+
+/**
+ * Whether commit lists show the lines added and deleted by each commit.
+ * Defaults to true.
+ */
+export function getShowCommitLineStats(): boolean {
+  return localStorage.getItem(showCommitLineStatsKey) !== '0'
+}
+
+export function setShowCommitLineStats(value: boolean): void {
+  localStorage.setItem(showCommitLineStatsKey, value ? '1' : '0')
+}

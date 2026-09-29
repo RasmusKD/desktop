@@ -54,6 +54,7 @@ interface IRepositoryViewProps {
   readonly showSideBySideDiff: boolean
   readonly showDiffCheckMarks: boolean
   readonly preferAbsoluteDates: boolean
+  readonly showCommitLineStats: boolean
   readonly askForConfirmationOnDiscardChanges: boolean
   readonly askForConfirmationOnCommitFilteredChanges: boolean
   readonly askForConfirmationOnDiscardStash: boolean
@@ -380,6 +381,7 @@ export class RepositoryView extends React.Component<
         }
         accounts={this.props.accounts}
         preferAbsoluteDates={this.props.preferAbsoluteDates}
+        showCommitLineStats={this.props.showCommitLineStats}
       />
     )
   }

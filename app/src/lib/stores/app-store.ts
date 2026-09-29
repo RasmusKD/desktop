@@ -54,6 +54,8 @@ import { CloningRepository } from '../../models/cloning-repository'
 import {
   getPreferAbsoluteDates,
   setPreferAbsoluteDates,
+  getShowCommitLineStats,
+  setShowCommitLineStats,
 } from '../../models/formatting-preferences'
 import {
   Commit,
@@ -744,6 +746,8 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
   private preferAbsoluteDates: boolean = false
 
+  private showCommitLineStats: boolean = true
+
   private cachedRepoRulesets = new Map<number, IAPIRepoRuleset>()
 
   private underlineLinks: boolean = underlineLinksDefault
@@ -1361,6 +1365,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
       showDiffCheckMarks: this.showDiffCheckMarks,
       alwaysShowWorktreeList: this.alwaysShowWorktreeList,
       preferAbsoluteDates: this.preferAbsoluteDates,
+      showCommitLineStats: this.showCommitLineStats,
       updateState: updateStore.state,
       commitMessageGenerationDisclaimerLastSeen:
         this.commitMessageGenerationDisclaimerLastSeen,
@@ -1977,6 +1982,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
     query: string
   ): Promise<ReadonlyArray<string> | null> {
     return this.gitStoreCache.get(repository).searchCommits(query)
+  }
+
+  /** This shouldn't be called directly. See `Dispatcher`. */
+  public _loadCommitLineStats(
+    repository: Repository,
+    shas: ReadonlyArray<string>
+  ): Promise<void> {
+    return this.gitStoreCache.get(repository).loadLineStats(shas)
   }
 
   public async _loadNextCommitBatch(repository: Repository): Promise<void> {
@@ -2642,6 +2655,7 @@ export class AppStore extends TypedBaseStore<IAppState> {
     )
 
     this.preferAbsoluteDates = getPreferAbsoluteDates()
+    this.showCommitLineStats = getShowCommitLineStats()
 
     this.commitMessageGenerationDisclaimerLastSeen =
       getNumber(commitMessageGenerationDisclaimerLastSeenKey) ?? null
@@ -10744,6 +10758,14 @@ export class AppStore extends TypedBaseStore<IAppState> {
     if (value !== this.preferAbsoluteDates) {
       this.preferAbsoluteDates = value
       setPreferAbsoluteDates(value)
+      this.emitUpdate()
+    }
+  }
+
+  public _setShowCommitLineStats(value: boolean) {
+    if (value !== this.showCommitLineStats) {
+      this.showCommitLineStats = value
+      setShowCommitLineStats(value)
       this.emitUpdate()
     }
   }

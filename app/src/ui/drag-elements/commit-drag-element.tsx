@@ -192,6 +192,7 @@ export class CommitDragElement extends React.Component<
             showUnpushedIndicator={false}
             accounts={this.props.accounts}
             preferAbsoluteDates={false}
+            showLineStats={false}
           />
         </div>
         {this.renderDragToolTip()}

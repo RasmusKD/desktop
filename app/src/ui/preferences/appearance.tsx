@@ -38,6 +38,8 @@ interface IAppearanceProps {
   readonly onSelectedNumberFormatChanged: (format: INumberFormat) => void
   readonly preferAbsoluteDates: boolean
   readonly onPreferAbsoluteDatesChanged: (value: boolean) => void
+  readonly showCommitLineStats: boolean
+  readonly onShowCommitLineStatsChanged: (value: boolean) => void
 }
 
 interface IAppearanceState {
@@ -131,6 +133,12 @@ export class Appearance extends React.Component<
     event: React.FormEvent<HTMLInputElement>
   ) => {
     this.props.onPreferAbsoluteDatesChanged(event.currentTarget.checked)
+  }
+
+  private onShowCommitLineStatsChanged = (
+    event: React.FormEvent<HTMLInputElement>
+  ) => {
+    this.props.onShowCommitLineStatsChanged(event.currentTarget.checked)
   }
 
   private onAlwaysShowWorktreeListChanged = (
@@ -264,6 +272,17 @@ export class Appearance extends React.Component<
               : CheckboxValue.Off
           }
           onChange={this.onPreferAbsoluteDatesChanged}
+        />
+
+        <Checkbox
+          className="show-commit-line-stats"
+          label="Show lines added and deleted in commit history"
+          value={
+            this.props.showCommitLineStats
+              ? CheckboxValue.On
+              : CheckboxValue.Off
+          }
+          onChange={this.onShowCommitLineStatsChanged}
         />
       </div>
     )

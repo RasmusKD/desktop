@@ -25,6 +25,8 @@ function renderAppearance(alwaysShowWorktreeList = false) {
     onSelectedNumberFormatChanged: () => {},
     preferAbsoluteDates: false,
     onPreferAbsoluteDatesChanged: () => {},
+    showCommitLineStats: true,
+    onShowCommitLineStatsChanged: () => {},
     alwaysShowWorktreeList,
     onAlwaysShowWorktreeListChanged: (value: boolean) => changes.push(value),
   }

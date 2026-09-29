@@ -40,7 +40,8 @@ import {
   getBranches,
   deleteRef,
   getCommits,
-  getCommitLineStats,
+  getShallowBoundary,
+  streamCommitLineStats,
   merge,
   setRemoteURL,
   getStatus,
@@ -109,6 +110,9 @@ const LoadingHistoryRequestKey = 'history'
 /** How far back from HEAD a commit search looks. */
 const CommitSearchLimit = 10000
 
+/** How long streamed line stats collect before the list re-renders, in ms. */
+const LineStatsEmitInterval = 50
+
 /** The max number of recent branches to find. */
 const RecentBranchesLimit = 5
 
@@ -116,6 +120,9 @@ const RecentBranchesLimit = 5
 export class GitStore extends BaseStore {
   /** The commits keyed by their SHA. */
   public readonly commitLookup = new Map<string, Commit>()
+
+  /** The line stats load in flight, cancelled by the next one. */
+  private lineStatsRequest: AbortController | null = null
 
   public pullWithRebase?: boolean
 
@@ -667,49 +674,84 @@ export class GitStore extends BaseStore {
     return this._localCommitSHAs
   }
 
-  /**
-   * Store the given commits, keeping line stats already loaded for a SHA and
-   * loading them in the background for the rest.
-   */
+  /** Store the given commits, keeping line stats already loaded for a SHA. */
   private storeCommits(commits: ReadonlyArray<Commit>) {
-    const missingStats = new Array<string>()
     for (const commit of commits) {
       const known = this.commitLookup.get(commit.sha)?.lineStats
-      if (known !== undefined) {
-        this.commitLookup.set(commit.sha, withLineStats(commit, known))
-      } else {
-        this.commitLookup.set(commit.sha, commit)
-        missingStats.push(commit.sha)
-      }
-    }
-
-    if (missingStats.length > 0) {
-      this.loadLineStats(missingStats)
+      this.commitLookup.set(
+        commit.sha,
+        known === undefined ? commit : withLineStats(commit, known)
+      )
     }
   }
 
-  /** Load line stats a page at a time, so the visible rows fill in first. */
-  private async loadLineStats(shas: ReadonlyArray<string>) {
-    for (let i = 0; i < shas.length; i += CommitBatchSize) {
-      let stats
-      try {
-        stats = await getCommitLineStats(
-          this.repository,
-          shas.slice(i, i + CommitBatchSize)
-        )
-      } catch (e) {
-        // The stats are decoration; the list stays usable without them.
-        log.warn('Failed loading commit line stats', e)
-        return
-      }
+  /**
+   * Load line stats for the given commits, typically the rows on screen.
+   * A newer request cancels the one in flight, since scrolling on makes the
+   * old rows irrelevant; rows it did not reach are requested again when they
+   * come back into view.
+   */
+  public async loadLineStats(shas: ReadonlyArray<string>) {
+    this.lineStatsRequest?.abort()
+    const request = new AbortController()
+    this.lineStatsRequest = request
 
-      for (const [sha, lineStats] of stats) {
-        const commit = this.commitLookup.get(sha)
-        if (commit !== undefined) {
-          this.commitLookup.set(sha, withLineStats(commit, lineStats))
-        }
+    let shallow
+    try {
+      shallow = await getShallowBoundary(this.repository)
+    } catch (e) {
+      log.warn('Failed reading the shallow boundary', e)
+      return
+    }
+    if (request.signal.aborted) {
+      return
+    }
+
+    // A shallow-boundary commit has no parents here, so git would count its
+    // whole tree as added; it gets no stats rather than wrong ones.
+    const missing = shas.filter(
+      sha =>
+        !shallow.has(sha) &&
+        this.commitLookup.has(sha) &&
+        this.commitLookup.get(sha)?.lineStats === undefined
+    )
+    if (missing.length === 0) {
+      return
+    }
+
+    // Rows arrive one commit at a time; render them in small batches.
+    let emitTimer: number | null = null
+    const flush = () => {
+      if (emitTimer !== null) {
+        window.clearTimeout(emitTimer)
+        emitTimer = null
       }
       this.emitUpdate()
+    }
+
+    try {
+      await streamCommitLineStats(
+        this.repository,
+        missing,
+        (sha, lineStats) => {
+          const commit = this.commitLookup.get(sha)
+          if (commit === undefined) {
+            return
+          }
+          this.commitLookup.set(sha, withLineStats(commit, lineStats))
+          emitTimer ??= window.setTimeout(flush, LineStatsEmitInterval)
+        },
+        request.signal
+      )
+    } catch (e) {
+      // The stats are decoration; the list stays usable without them, and
+      // the next request for these rows tries again.
+      log.warn('Failed loading commit line stats', e)
+    } finally {
+      if (this.lineStatsRequest === request) {
+        this.lineStatsRequest = null
+      }
+      flush()
     }
   }
 

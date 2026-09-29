@@ -182,6 +182,9 @@ interface ICommitListProps {
 
   readonly preferAbsoluteDates: boolean
 
+  /** Whether rows show the lines added and deleted by each commit */
+  readonly showLineStats?: boolean
+
   /** This will make the list semantics friendly to screen reader users in browse mode. */
   readonly isInformationalView?: boolean
 }
@@ -311,6 +314,7 @@ export class CommitList extends React.Component<
         disableSquashing={this.props.disableSquashing}
         accounts={this.props.accounts}
         preferAbsoluteDates={this.props.preferAbsoluteDates}
+        showLineStats={this.props.showLineStats === true}
       />
     )
   }
@@ -618,6 +622,7 @@ export class CommitList extends React.Component<
             tagsToPush: this.props.tagsToPush,
             shasToHighlight: this.props.shasToHighlight,
             preferAbsoluteDates: this.props.preferAbsoluteDates,
+            showLineStats: this.props.showLineStats,
           }}
           setScrollTop={this.props.compareListScrollTop}
           rowCustomClassNameMap={this.getRowCustomClassMap()}

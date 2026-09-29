@@ -401,6 +401,9 @@ export interface IAppState {
   /** Whether the user prefers absolute dates over relative time in lists */
   readonly preferAbsoluteDates: boolean
 
+  /** Whether commit lists show the lines added and deleted per commit */
+  readonly showCommitLineStats: boolean
+
   /**
    * Cached repo rulesets. Used to prevent repeatedly querying the same
    * rulesets to check their bypass status.

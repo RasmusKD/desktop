@@ -256,6 +256,17 @@ export class Dispatcher {
     return this.appStore._searchCommits(repository, query)
   }
 
+  /**
+   * Load the lines added and deleted by the given commits, cancelling any
+   * load still in flight for the repository.
+   */
+  public loadCommitLineStats(
+    repository: Repository,
+    shas: ReadonlyArray<string>
+  ): Promise<void> {
+    return this.appStore._loadCommitLineStats(repository, shas)
+  }
+
   /** Load the changed files for the current history selection. */
   public loadChangedFilesForCurrentSelection(
     repository: Repository
@@ -4229,6 +4240,10 @@ export class Dispatcher {
 
   public setPreferAbsoluteDates(value: boolean) {
     return this.appStore._setPreferAbsoluteDates(value)
+  }
+
+  public setShowCommitLineStats(value: boolean) {
+    return this.appStore._setShowCommitLineStats(value)
   }
 
   public testPruneBranches() {

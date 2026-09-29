@@ -73,6 +73,7 @@ import {
   TimeFormat,
   INumberFormat,
   getPreferAbsoluteDates,
+  getShowCommitLineStats,
   getDateFormatPreference,
   getTimeFormatPreference,
   getNumberFormatPreference,
@@ -198,6 +199,7 @@ interface IPreferencesState {
   readonly selectedTimeFormat?: TimeFormat
   readonly selectedNumberFormat?: INumberFormat
   readonly preferAbsoluteDates?: boolean
+  readonly showCommitLineStats?: boolean
 }
 
 /**
@@ -270,6 +272,7 @@ export class Preferences extends React.Component<
       selectedTimeFormat: getTimeFormatPreference(),
       selectedNumberFormat: getNumberFormatPreference(),
       preferAbsoluteDates: getPreferAbsoluteDates(),
+      showCommitLineStats: getShowCommitLineStats(),
     }
   }
 
@@ -675,6 +678,10 @@ export class Preferences extends React.Component<
               this.state.preferAbsoluteDates ?? getPreferAbsoluteDates()
             }
             onPreferAbsoluteDatesChanged={this.onPreferAbsoluteDatesChanged}
+            showCommitLineStats={
+              this.state.showCommitLineStats ?? getShowCommitLineStats()
+            }
+            onShowCommitLineStatsChanged={this.onShowCommitLineStatsChanged}
           />
         )
         break
@@ -904,6 +911,10 @@ export class Preferences extends React.Component<
 
   private onPreferAbsoluteDatesChanged = (preferAbsoluteDates: boolean) => {
     this.setState({ preferAbsoluteDates })
+  }
+
+  private onShowCommitLineStatsChanged = (showCommitLineStats: boolean) => {
+    this.setState({ showCommitLineStats })
   }
 
   private onUseCustomEditorChanged = (useCustomEditor: boolean) => {
@@ -1211,6 +1222,10 @@ export class Preferences extends React.Component<
 
       if (this.state.preferAbsoluteDates !== undefined) {
         dispatcher.setPreferAbsoluteDates(this.state.preferAbsoluteDates)
+      }
+
+      if (this.state.showCommitLineStats !== undefined) {
+        dispatcher.setShowCommitLineStats(this.state.showCommitLineStats)
       }
     }
 

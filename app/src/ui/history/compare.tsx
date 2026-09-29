@@ -64,6 +64,7 @@ interface ICompareSidebarProps {
   readonly shasToHighlight: ReadonlyArray<string>
   readonly accounts: ReadonlyArray<Account>
   readonly preferAbsoluteDates: boolean
+  readonly showCommitLineStats: boolean
 }
 interface ICompareSidebarState {
   /**
@@ -92,6 +93,15 @@ const CloseToBottomThreshold = 10
 /** Quiet period after the last keystroke before a commit search runs. */
 const CommitSearchDelayMs = 200
 
+/** Quiet period after the list last moved before line stats load. */
+const LineStatsDelayMs = 100
+
+/** Rows above and below the viewport that get line stats too. */
+const LineStatsOverscan = 15
+
+/** The rows assumed visible until the list first reports its viewport. */
+const InitialVisibleRows = 30
+
 export class CompareSidebar extends React.Component<
   ICompareSidebarProps,
   ICompareSidebarState
@@ -106,6 +116,8 @@ export class CompareSidebar extends React.Component<
   private commitSearchTimer: number | null = null
   /** Identifies the latest search, so a slower earlier one cannot win. */
   private commitSearchId = 0
+  private visibleRows = { start: 0, end: InitialVisibleRows }
+  private lineStatsTimer: number | null = null
 
   public constructor(props: ICompareSidebarProps) {
     super(props)
@@ -148,7 +160,24 @@ export class CompareSidebar extends React.Component<
     }
   }
 
-  public componentDidUpdate(prevProps: ICompareSidebarProps) {
+  public componentDidMount() {
+    this.scheduleLineStats()
+  }
+
+  public componentDidUpdate(
+    prevProps: ICompareSidebarProps,
+    prevState: ICompareSidebarState
+  ) {
+    // The list only reports scrolling, so a new set of rows under an
+    // unmoved viewport, or the setting turning on, asks here instead.
+    if (
+      listKey(this.getDisplayedCommitSHAs(prevProps, prevState)) !==
+        listKey(this.getDisplayedCommitSHAs(this.props, this.state)) ||
+      (this.props.showCommitLineStats && !prevProps.showCommitLineStats)
+    ) {
+      this.scheduleLineStats()
+    }
+
     // A new tip (commit, checkout, pull) makes the current results stale.
     if (
       this.state.commitQuery.trim().length > 0 &&
@@ -184,6 +213,10 @@ export class CompareSidebar extends React.Component<
   public componentWillUnmount() {
     this.textbox = null
     this.cancelCommitSearch()
+    if (this.lineStatsTimer !== null) {
+      window.clearTimeout(this.lineStatsTimer)
+      this.lineStatsTimer = null
+    }
 
     // by hiding the branch list here when the component is torn down
     // we ensure any ahead/behind computation work is discarded
@@ -374,13 +407,42 @@ export class CompareSidebar extends React.Component<
     })
   }
 
+  /** The SHAs the commit list shows: search results, or the history. */
+  private getDisplayedCommitSHAs(
+    props: ICompareSidebarProps,
+    state: ICompareSidebarState
+  ): ReadonlyArray<string> {
+    return props.compareState.formState.kind === HistoryTabMode.History &&
+      state.searchResultSHAs !== null
+      ? state.searchResultSHAs
+      : props.compareState.commitSHAs
+  }
+
+  /** Load line stats for the rows on screen once the list settles. */
+  private scheduleLineStats() {
+    if (this.lineStatsTimer !== null) {
+      window.clearTimeout(this.lineStatsTimer)
+    }
+    this.lineStatsTimer = window.setTimeout(() => {
+      this.lineStatsTimer = null
+      if (!this.props.showCommitLineStats) {
+        return
+      }
+      const { start, end } = this.visibleRows
+      const shas = this.getDisplayedCommitSHAs(this.props, this.state).slice(
+        Math.max(0, start - LineStatsOverscan),
+        end + LineStatsOverscan + 1
+      )
+      if (shas.length > 0) {
+        this.props.dispatcher.loadCommitLineStats(this.props.repository, shas)
+      }
+    }, LineStatsDelayMs)
+  }
+
   private renderCommitList() {
     const { formState } = this.props.compareState
     const searching = this.isShowingSearchResults
-    const commitSHAs =
-      searching && this.state.searchResultSHAs !== null
-        ? this.state.searchResultSHAs
-        : this.props.compareState.commitSHAs
+    const commitSHAs = this.getDisplayedCommitSHAs(this.props, this.state)
     // Reordering and squashing act on list positions, which a filtered list
     // does not share with the history.
     const canRewrite = formState.kind === HistoryTabMode.History && !searching
@@ -456,6 +518,7 @@ export class CompareSidebar extends React.Component<
         keyboardReorderData={this.state.keyboardReorderData}
         accounts={this.props.accounts}
         preferAbsoluteDates={this.props.preferAbsoluteDates}
+        showLineStats={this.props.showCommitLineStats}
       />
     )
   }
@@ -685,6 +748,9 @@ export class CompareSidebar extends React.Component<
   }
 
   private onScroll = (start: number, end: number) => {
+    this.visibleRows = { start, end }
+    this.scheduleLineStats()
+
     const compareState = this.props.compareState
     const formState = compareState.formState
 
@@ -927,4 +993,12 @@ function ableToRevertCommit(
     formState.kind === HistoryTabMode.History ||
     formState.comparisonMode === ComparisonMode.Ahead
   )
+}
+
+/**
+ * Identifies a commit list by its length and ends, so a re-render that hands
+ * over an equal list does not count as new rows.
+ */
+function listKey(shas: ReadonlyArray<string>): string {
+  return `${shas.length}:${shas[0]}:${shas[shas.length - 1]}`
 }

@@ -1,4 +1,7 @@
 import { git } from './core'
+import { spawnGit } from './spawn'
+import { readFile } from 'fs/promises'
+import * as Path from 'path'
 import {
   CommittedFileChange,
   AppFileStatusKind,
@@ -212,48 +215,137 @@ export async function getCommits(
 }
 
 /**
- * Get the lines added and deleted by each of the given commits. Merge commits
- * are measured against their first parent, matching the changeset view.
+ * Stream the lines added and deleted by each of the given commits, calling
+ * `onStats` as git finishes each one. Merges are measured against their first
+ * parent with copy and rename detection, matching the changeset view; root
+ * commits are measured against the empty tree whatever `log.showRoot` says.
  *
- * Every SHA lands on the command line, so callers pass a page (about a
- * hundred) at a time.
+ * Every SHA lands on the command line, so callers pass about a screenful at a
+ * time. Aborting the signal kills git and resolves the promise.
  */
-export async function getCommitLineStats(
+export async function streamCommitLineStats(
   repository: Repository,
-  shas: ReadonlyArray<string>
-): Promise<Map<string, ICommitLineStats>> {
-  const { stdout } = await git(
+  shas: ReadonlyArray<string>,
+  onStats: (sha: string, stats: ICommitLineStats) => void,
+  signal: AbortSignal
+): Promise<void> {
+  const child = await spawnGit(
     [
       'log',
       '--no-walk=unsorted',
       '--format=%x00%H',
       '--shortstat',
       '--diff-merges=first-parent',
+      '-C',
+      '-M',
+      '--root',
       '--no-color',
       '--end-of-options',
       ...shas,
       '--',
     ],
     repository.path,
-    'getCommitLineStats'
+    'streamCommitLineStats',
+    { isBackgroundTask: true }
   )
 
-  const stats = new Map<string, ICommitLineStats>()
-  for (const record of stdout.split('\0')) {
-    const newline = record.indexOf('\n')
-    const sha = (newline === -1 ? record : record.slice(0, newline)).trim()
-    if (sha.length === 0) {
-      continue
+  return new Promise<void>((resolve, reject) => {
+    const kill = () => child.kill()
+    if (signal.aborted) {
+      kill()
+    } else {
+      signal.addEventListener('abort', kill, { once: true })
     }
-    const added = /(\d+) insertions?\(\+\)/.exec(record)
-    const deleted = /(\d+) deletions?\(-\)/.exec(record)
-    stats.set(sha, {
+
+    const emit = (record: string) => {
+      const parsed = parseLineStatsRecord(record)
+      if (parsed !== null) {
+        onStats(parsed.sha, parsed.stats)
+      }
+    }
+
+    // A record is complete once the NUL opening the next one arrives, or the
+    // stream ends; git writes each commit's stat as soon as it is computed.
+    let pending = ''
+    let stderr = ''
+    child.stdout?.setEncoding('utf8')
+    child.stdout?.on('data', (chunk: string) => {
+      const records = (pending + chunk).split('\0')
+      pending = records.pop() ?? ''
+      records.forEach(emit)
+    })
+    child.stderr?.setEncoding('utf8')
+    child.stderr?.on('data', (chunk: string) => {
+      stderr += chunk
+    })
+    child.on('error', reject)
+    child.on('close', code => {
+      signal.removeEventListener('abort', kill)
+      if (signal.aborted) {
+        resolve()
+        return
+      }
+      emit(pending)
+      if (code === 0) {
+        resolve()
+      } else {
+        reject(new Error(`git log exited with ${code}: ${stderr.trim()}`))
+      }
+    })
+  })
+}
+
+function parseLineStatsRecord(
+  record: string
+): { sha: string; stats: ICommitLineStats } | null {
+  const newline = record.indexOf('\n')
+  const sha = (newline === -1 ? record : record.slice(0, newline)).trim()
+  if (sha.length === 0) {
+    return null
+  }
+  const added = /(\d+) insertions?\(\+\)/.exec(record)
+  const deleted = /(\d+) deletions?\(-\)/.exec(record)
+  return {
+    sha,
+    stats: {
       added: added === null ? 0 : parseInt(added[1], 10),
       deleted: deleted === null ? 0 : parseInt(deleted[1], 10),
-    })
+    },
+  }
+}
+
+/**
+ * The commits at the boundary of a shallow clone. Git has no parents for them
+ * and would diff them against the empty tree, so their line counts are wrong.
+ */
+export async function getShallowBoundary(
+  repository: Repository
+): Promise<ReadonlySet<string>> {
+  const { stdout } = await git(
+    ['rev-parse', '--git-path', 'shallow'],
+    repository.path,
+    'getShallowBoundary'
+  )
+
+  let contents
+  try {
+    contents = await readFile(
+      Path.resolve(repository.path, stdout.trim()),
+      'utf8'
+    )
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      return new Set()
+    }
+    throw e
   }
 
-  return stats
+  return new Set(
+    contents
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+  )
 }
 
 /** This interface contains information of a changeset. */
