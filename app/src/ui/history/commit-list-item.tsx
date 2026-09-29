@@ -168,6 +168,7 @@ export class CommitListItem extends React.PureComponent<
               <div className="byline">
                 <CommitAttribution avatarUsers={this.state.avatarUsers} />
                 {renderRelativeTime(date, this.props.preferAbsoluteDates)}
+                {renderLineStats(commit)}
               </div>
             </div>
           </div>
@@ -180,12 +181,10 @@ export class CommitListItem extends React.PureComponent<
   private renderCommitIndicators() {
     const tagIndicator = renderCommitListItemTags(this.props.commit.tags)
     const unpushedIndicator = this.renderUnpushedIndicator()
-    const lineStats = renderLineStats(this.props.commit)
 
-    if (tagIndicator || unpushedIndicator || lineStats) {
+    if (tagIndicator || unpushedIndicator) {
       return (
         <div className="commit-indicators">
-          {lineStats}
           {tagIndicator}
           {unpushedIndicator}
         </div>

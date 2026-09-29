@@ -19,6 +19,8 @@ import { IBranchListItem } from '../branches/group-branches'
 import { TabBar } from '../tab-bar'
 import { CompareBranchListItem } from './compare-branch-list-item'
 import { FancyTextBox } from '../lib/fancy-text-box'
+import { Button } from '../lib/button'
+import { Octicon } from '../octicons'
 import * as octicons from '../octicons/octicons.generated'
 import { SelectionSource } from '../lib/filter-list'
 import { IMatches } from '../../lib/fuzzy-find'
@@ -79,6 +81,9 @@ interface ICompareSidebarState {
 
   /** SHAs matching `commitQuery`, or null while no search is shown. */
   readonly searchResultSHAs: ReadonlyArray<string> | null
+
+  /** What the search box at the top of the history does. */
+  readonly searchMode: 'commits' | 'branches'
 }
 
 /** If we're within this many rows from the bottom, load the next history batch. */
@@ -92,6 +97,7 @@ export class CompareSidebar extends React.Component<
   ICompareSidebarState
 > {
   private textbox: TextBox | null = null
+  private commitSearchBox: TextBox | null = null
   private readonly loadChangedFilesScheduler = new ThrottledScheduler(200)
   private branchList: BranchList | null = null
   private commitListRef = React.createRef<CommitList>()
@@ -108,6 +114,7 @@ export class CompareSidebar extends React.Component<
       focusedBranch: null,
       commitQuery: '',
       searchResultSHAs: null,
+      searchMode: 'commits',
     }
   }
 
@@ -186,51 +193,106 @@ export class CompareSidebar extends React.Component<
   }
 
   public render() {
-    const { branches, filterText, showBranchList } = this.props.compareState
-    const placeholderText = getPlaceholderText(this.props.compareState)
+    const { showBranchList } = this.props.compareState
+    const branchMode = this.isBranchMode
 
     return (
       <div id="compare-view" role="tabpanel" aria-labelledby="history-tab">
-        <div className="compare-form">
-          <FancyTextBox
-            ariaLabel="Branch filter"
-            symbol={octicons.gitBranch}
-            displayClearButton={true}
-            placeholder={placeholderText}
-            onFocus={this.onTextBoxFocused}
-            value={filterText}
-            disabled={!branches.some(b => !b.isDesktopForkRemoteBranch)}
-            onRef={this.onTextBoxRef}
-            onValueChanged={this.onBranchFilterTextChanged}
-            onKeyDown={this.onBranchFilterKeyDown}
-            onSearchCleared={this.handleEscape}
-          />
+        <div className="compare-form search-form">
+          <Button
+            className="search-mode-toggle"
+            size="small"
+            onClick={this.onToggleSearchMode}
+            ariaLabel={
+              branchMode
+                ? 'Switch to commit search'
+                : 'Switch to branch compare'
+            }
+            tooltip={
+              branchMode
+                ? 'Switch to commit search'
+                : 'Switch to branch compare'
+            }
+          >
+            <Octicon
+              symbol={branchMode ? octicons.gitBranch : octicons.gitCommit}
+            />
+          </Button>
+          {branchMode ? this.renderBranchBox() : this.renderCommitSearchBox()}
         </div>
 
-        {showBranchList ? null : this.renderCommitSearch()}
         {showBranchList ? this.renderFilterList() : this.renderCommits()}
       </div>
     )
   }
 
-  private renderCommitSearch() {
-    if (this.props.compareState.formState.kind !== HistoryTabMode.History) {
-      return null
-    }
-
+  /**
+   * Whether the search box compares branches rather than searching commits.
+   * An active comparison always shows its branch.
+   */
+  private get isBranchMode() {
     return (
-      <div className="compare-form">
-        <FancyTextBox
-          ariaLabel="Search commits"
-          symbol={octicons.search}
-          displayClearButton={true}
-          placeholder="Search commits (message, author, SHA)…"
-          value={this.state.commitQuery}
-          onValueChanged={this.onCommitQueryChanged}
-          onSearchCleared={this.onCommitSearchCleared}
-        />
-      </div>
+      this.state.searchMode === 'branches' ||
+      this.props.compareState.formState.kind === HistoryTabMode.Compare
     )
+  }
+
+  private renderBranchBox() {
+    const { branches, filterText } = this.props.compareState
+    return (
+      <FancyTextBox
+        key="branches"
+        ariaLabel="Branch filter"
+        symbol={octicons.gitBranch}
+        displayClearButton={true}
+        placeholder={getPlaceholderText(this.props.compareState)}
+        onFocus={this.onTextBoxFocused}
+        value={filterText}
+        disabled={!branches.some(b => !b.isDesktopForkRemoteBranch)}
+        onRef={this.onTextBoxRef}
+        onValueChanged={this.onBranchFilterTextChanged}
+        onKeyDown={this.onBranchFilterKeyDown}
+        onSearchCleared={this.handleEscape}
+      />
+    )
+  }
+
+  private renderCommitSearchBox() {
+    return (
+      <FancyTextBox
+        key="commits"
+        ariaLabel="Search commits"
+        symbol={octicons.search}
+        displayClearButton={true}
+        placeholder="Search commits (message, author, SHA)…"
+        value={this.state.commitQuery}
+        onRef={this.onCommitSearchRef}
+        onValueChanged={this.onCommitQueryChanged}
+        onSearchCleared={this.onCommitSearchCleared}
+      />
+    )
+  }
+
+  private onCommitSearchRef = (textbox: TextBox | null) => {
+    this.commitSearchBox = textbox
+  }
+
+  private onToggleSearchMode = () => {
+    if (this.isBranchMode) {
+      this.props.dispatcher.updateCompareForm(this.props.repository, {
+        filterText: '',
+        showBranchList: false,
+      })
+      if (this.props.compareState.formState.kind === HistoryTabMode.Compare) {
+        this.viewHistoryForBranch()
+      }
+      this.setState({ searchMode: 'commits' }, () =>
+        this.commitSearchBox?.focus()
+      )
+    } else {
+      this.onCommitQueryChanged('')
+      this.setState({ searchMode: 'branches' }, () => this.textbox?.focus())
+    }
   }
 
   /** Whether the list shows search results instead of the history. */
