@@ -245,6 +245,17 @@ export class Dispatcher {
     return this.appStore._loadNextCommitBatch(repository)
   }
 
+  /**
+   * Search the history of HEAD for commits matching the query. Resolves with
+   * the matching SHAs in history order, or null if the search failed.
+   */
+  public searchCommits(
+    repository: Repository,
+    query: string
+  ): Promise<ReadonlyArray<string> | null> {
+    return this.appStore._searchCommits(repository, query)
+  }
+
   /** Load the changed files for the current history selection. */
   public loadChangedFilesForCurrentSelection(
     repository: Repository

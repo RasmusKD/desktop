@@ -78,6 +78,12 @@ export type CommitOneLine = {
   readonly summary: string
 }
 
+/** Lines added and deleted by a commit, measured against its first parent. */
+export interface ICommitLineStats {
+  readonly added: number
+  readonly deleted: number
+}
+
 /** A git commit. */
 export class Commit {
   /**
@@ -115,6 +121,7 @@ export class Commit {
    * @param trailers Parsed, unfolded trailers from the commit message body,
    *                 if any, as interpreted by `git interpret-trailers`
    * @param tags Tags associated with this commit.
+   * @param lineStats Lines added and deleted, once loaded.
    */
   public constructor(
     public readonly sha: string,
@@ -125,7 +132,8 @@ export class Commit {
     public readonly committer: CommitIdentity,
     public readonly parentSHAs: ReadonlyArray<string>,
     public readonly trailers: ReadonlyArray<ITrailer>,
-    public readonly tags: ReadonlyArray<string>
+    public readonly tags: ReadonlyArray<string>,
+    public readonly lineStats?: ICommitLineStats
   ) {
     this.coAuthors = extractCoAuthors(trailers)
 
@@ -137,4 +145,23 @@ export class Commit {
 
     this.isMergeCommit = parentSHAs.length > 1
   }
+}
+
+/** A copy of the commit carrying the given line stats. */
+export function withLineStats(
+  commit: Commit,
+  lineStats: ICommitLineStats
+): Commit {
+  return new Commit(
+    commit.sha,
+    commit.shortSha,
+    commit.summary,
+    commit.body,
+    commit.author,
+    commit.committer,
+    commit.parentSHAs,
+    commit.trailers,
+    commit.tags,
+    lineStats
+  )
 }

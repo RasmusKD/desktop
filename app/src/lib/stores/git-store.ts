@@ -15,7 +15,7 @@ import {
   ICompareResult,
 } from '../../models/branch'
 import { Tip, TipState } from '../../models/tip'
-import { Commit } from '../../models/commit'
+import { Commit, withLineStats } from '../../models/commit'
 import { IRemote } from '../../models/remote'
 import { IFetchProgress, IRevertProgress } from '../../models/progress'
 import {
@@ -40,6 +40,7 @@ import {
   getBranches,
   deleteRef,
   getCommits,
+  getCommitLineStats,
   merge,
   setRemoteURL,
   getStatus,
@@ -104,6 +105,9 @@ import { findDefaultBranch } from '../find-default-branch'
 const CommitBatchSize = 100
 
 const LoadingHistoryRequestKey = 'history'
+
+/** How far back from HEAD a commit search looks. */
+const CommitSearchLimit = 10000
 
 /** The max number of recent branches to find. */
 const RecentBranchesLimit = 5
@@ -663,11 +667,81 @@ export class GitStore extends BaseStore {
     return this._localCommitSHAs
   }
 
-  /** Store the given commits. */
+  /**
+   * Store the given commits, keeping line stats already loaded for a SHA and
+   * loading them in the background for the rest.
+   */
   private storeCommits(commits: ReadonlyArray<Commit>) {
+    const missingStats = new Array<string>()
     for (const commit of commits) {
-      this.commitLookup.set(commit.sha, commit)
+      const known = this.commitLookup.get(commit.sha)?.lineStats
+      if (known !== undefined) {
+        this.commitLookup.set(commit.sha, withLineStats(commit, known))
+      } else {
+        this.commitLookup.set(commit.sha, commit)
+        missingStats.push(commit.sha)
+      }
     }
+
+    if (missingStats.length > 0) {
+      this.loadLineStats(missingStats)
+    }
+  }
+
+  /** Load line stats a page at a time, so the visible rows fill in first. */
+  private async loadLineStats(shas: ReadonlyArray<string>) {
+    for (let i = 0; i < shas.length; i += CommitBatchSize) {
+      let stats
+      try {
+        stats = await getCommitLineStats(
+          this.repository,
+          shas.slice(i, i + CommitBatchSize)
+        )
+      } catch (e) {
+        // The stats are decoration; the list stays usable without them.
+        log.warn('Failed loading commit line stats', e)
+        return
+      }
+
+      for (const [sha, lineStats] of stats) {
+        const commit = this.commitLookup.get(sha)
+        if (commit !== undefined) {
+          this.commitLookup.set(sha, withLineStats(commit, lineStats))
+        }
+      }
+      this.emitUpdate()
+    }
+  }
+
+  /**
+   * Find commits reachable from HEAD whose summary, body, author or tags
+   * contain the query (case-insensitive), or whose SHA starts with it.
+   *
+   * Returns the matching SHAs in history order, or null on failure.
+   */
+  public async searchCommits(
+    query: string
+  ): Promise<ReadonlyArray<string> | null> {
+    const needle = query.trim().toLowerCase()
+    const commits = await this.performFailableOperation(() =>
+      getCommits(this.repository, 'HEAD', CommitSearchLimit)
+    )
+    if (commits === undefined) {
+      return null
+    }
+
+    const matches = commits.filter(
+      c =>
+        c.sha.startsWith(needle) ||
+        c.summary.toLowerCase().includes(needle) ||
+        c.body.toLowerCase().includes(needle) ||
+        c.author.name.toLowerCase().includes(needle) ||
+        c.author.email.toLowerCase().includes(needle) ||
+        c.tags.some(t => t.toLowerCase().includes(needle))
+    )
+
+    this.storeCommits(matches)
+    return matches.map(c => c.sha)
   }
 
   private async undoFirstCommit(

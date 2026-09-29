@@ -180,10 +180,12 @@ export class CommitListItem extends React.PureComponent<
   private renderCommitIndicators() {
     const tagIndicator = renderCommitListItemTags(this.props.commit.tags)
     const unpushedIndicator = this.renderUnpushedIndicator()
+    const lineStats = renderLineStats(this.props.commit)
 
-    if (tagIndicator || unpushedIndicator) {
+    if (tagIndicator || unpushedIndicator || lineStats) {
       return (
         <div className="commit-indicators">
+          {lineStats}
           {tagIndicator}
           {unpushedIndicator}
         </div>
@@ -245,6 +247,20 @@ function renderRelativeTime(date: Date, preferAbsoluteDates: boolean) {
         <RelativeTime date={date} tooltip={!enableAccessibleListToolTips()} />
       )}
     </>
+  )
+}
+
+function renderLineStats(commit: Commit) {
+  const { lineStats } = commit
+  if (lineStats === undefined) {
+    return null
+  }
+  const { added, deleted } = lineStats
+  return (
+    <span className="line-stats">
+      <span className="lines-added">+{added}</span>
+      <span className="lines-deleted">−{deleted}</span>
+    </span>
   )
 }
 

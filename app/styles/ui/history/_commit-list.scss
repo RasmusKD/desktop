@@ -148,6 +148,23 @@
     line-height: 16px;
     max-width: 50%;
 
+    .line-stats {
+      flex: 0 0 auto;
+      display: flex;
+      gap: var(--spacing-half);
+      padding: 0 var(--spacing-half);
+      font-family: var(--font-family-monospace);
+      font-size: var(--font-size-sm);
+
+      .lines-added {
+        color: var(--color-new);
+      }
+
+      .lines-deleted {
+        color: var(--color-deleted);
+      }
+    }
+
     .tag-indicator {
       display: flex;
       flex: 0 1 auto;

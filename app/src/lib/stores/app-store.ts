@@ -1972,6 +1972,13 @@ export class AppStore extends TypedBaseStore<IAppState> {
   }
 
   /** This shouldn't be called directly. See `Dispatcher`. */
+  public _searchCommits(
+    repository: Repository,
+    query: string
+  ): Promise<ReadonlyArray<string> | null> {
+    return this.gitStoreCache.get(repository).searchCommits(query)
+  }
+
   public async _loadNextCommitBatch(repository: Repository): Promise<void> {
     const gitStore = this.gitStoreCache.get(repository)
 

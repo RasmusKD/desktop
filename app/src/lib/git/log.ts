@@ -9,7 +9,7 @@ import {
   SubmoduleStatus,
 } from '../../models/status'
 import { Repository } from '../../models/repository'
-import { Commit } from '../../models/commit'
+import { Commit, ICommitLineStats } from '../../models/commit'
 import { CommitIdentity } from '../../models/commit-identity'
 import { parseRawUnfoldedTrailers } from './interpret-trailers'
 import { createLogParser } from './git-delimiter-parser'
@@ -209,6 +209,51 @@ export async function getCommits(
       tags
     )
   })
+}
+
+/**
+ * Get the lines added and deleted by each of the given commits. Merge commits
+ * are measured against their first parent, matching the changeset view.
+ *
+ * Every SHA lands on the command line, so callers pass a page (about a
+ * hundred) at a time.
+ */
+export async function getCommitLineStats(
+  repository: Repository,
+  shas: ReadonlyArray<string>
+): Promise<Map<string, ICommitLineStats>> {
+  const { stdout } = await git(
+    [
+      'log',
+      '--no-walk=unsorted',
+      '--format=%x00%H',
+      '--shortstat',
+      '--diff-merges=first-parent',
+      '--no-color',
+      '--end-of-options',
+      ...shas,
+      '--',
+    ],
+    repository.path,
+    'getCommitLineStats'
+  )
+
+  const stats = new Map<string, ICommitLineStats>()
+  for (const record of stdout.split('\0')) {
+    const newline = record.indexOf('\n')
+    const sha = (newline === -1 ? record : record.slice(0, newline)).trim()
+    if (sha.length === 0) {
+      continue
+    }
+    const added = /(\d+) insertions?\(\+\)/.exec(record)
+    const deleted = /(\d+) deletions?\(-\)/.exec(record)
+    stats.set(sha, {
+      added: added === null ? 0 : parseInt(added[1], 10),
+      deleted: deleted === null ? 0 : parseInt(deleted[1], 10),
+    })
+  }
+
+  return stats
 }
 
 /** This interface contains information of a changeset. */
