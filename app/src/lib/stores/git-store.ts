@@ -15,7 +15,13 @@ import {
   ICompareResult,
 } from '../../models/branch'
 import { Tip, TipState } from '../../models/tip'
-import { Commit, withLineStats } from '../../models/commit'
+import { Commit, ICommitLineStats, withLineStats } from '../../models/commit'
+import {
+  CommitLineStatsWorker,
+  getShallowFilePath,
+  readShallowBoundary,
+} from '../git/commit-line-stats'
+import { getCommitLineStatsDatabase } from '../databases/commit-line-stats-database'
 import { IRemote } from '../../models/remote'
 import { IFetchProgress, IRevertProgress } from '../../models/progress'
 import {
@@ -40,9 +46,6 @@ import {
   getBranches,
   deleteRef,
   getCommits,
-  getShallowFilePath,
-  readShallowBoundary,
-  streamCommitLineStats,
   merge,
   setRemoteURL,
   getStatus,
@@ -114,6 +117,12 @@ const CommitSearchLimit = 10000
 /** How long streamed line stats collect before the list re-renders, in ms. */
 const LineStatsEmitInterval = 50
 
+/**
+ * Concurrent git processes diffing commits for line stats. Four fill the
+ * visible rows fastest; more add process overhead without finishing sooner.
+ */
+const LineStatsWorkerCount = 4
+
 /** The max number of recent branches to find. */
 const RecentBranchesLimit = 5
 
@@ -122,11 +131,23 @@ export class GitStore extends BaseStore {
   /** The commits keyed by their SHA. */
   public readonly commitLookup = new Map<string, Commit>()
 
-  /** The line stats load in flight, cancelled by the next one. */
-  private lineStatsRequest: AbortController | null = null
-
   /** Where git keeps the shallow boundary; resolved on first use. */
   private shallowFilePath: string | null = null
+
+  /** Commits waiting for line stats, most wanted first, from the index on. */
+  private lineStatsQueue: ReadonlyArray<string> = []
+  private lineStatsQueueIndex = 0
+  /** Counts `loadLineStats` calls, so only the latest one sets the queue. */
+  private lineStatsGeneration = 0
+  private readonly lineStatsWorkers = new Array<CommitLineStatsWorker>()
+  private readonly lineStatsInFlight = new Set<string>()
+  /** Commits git gave no answer for; not retried this session. */
+  private readonly lineStatsFailed = new Set<string>()
+  /** Commits already looked up in the on-disk cache this session. */
+  private readonly lineStatsCacheChecked = new Set<string>()
+  /** Diffed stats not yet written to the on-disk cache. */
+  private unsavedLineStats = new Map<string, ICommitLineStats>()
+  private lineStatsFlushTimer: number | null = null
 
   public pullWithRebase?: boolean
 
@@ -690,15 +711,16 @@ export class GitStore extends BaseStore {
   }
 
   /**
-   * Load line stats for the given commits, typically the rows on screen.
-   * A newer request cancels the one in flight, since scrolling on makes the
-   * old rows irrelevant; rows it did not reach are requested again when they
-   * come back into view.
+   * Load line stats for the given commits, most wanted first. The order
+   * replaces the previous request's: commits already being diffed finish,
+   * the rest follow the new order, and an empty list stops further work.
+   *
+   * Counts come from the on-disk cache when a commit was diffed before, and
+   * otherwise from a small pool of long-lived git processes, so a scroll
+   * reorders the queue instead of restarting git.
    */
   public async loadLineStats(shas: ReadonlyArray<string>) {
-    this.lineStatsRequest?.abort()
-    const request = new AbortController()
-    this.lineStatsRequest = request
+    const generation = ++this.lineStatsGeneration
 
     let shallow
     try {
@@ -708,55 +730,140 @@ export class GitStore extends BaseStore {
       log.warn('Failed reading the shallow boundary', e)
       return
     }
-    if (request.signal.aborted) {
-      return
-    }
 
     // A shallow-boundary commit has no parents here, so git would count its
     // whole tree as added; it gets no stats rather than wrong ones.
-    const missing = shas.filter(
-      sha =>
-        !shallow.has(sha) &&
-        this.commitLookup.has(sha) &&
-        this.commitLookup.get(sha)?.lineStats === undefined
+    const wanted = shas.filter(
+      sha => !shallow.has(sha) && this.needsLineStats(sha)
     )
-    if (missing.length === 0) {
+
+    const unchecked = wanted.filter(sha => !this.lineStatsCacheChecked.has(sha))
+    if (unchecked.length > 0) {
+      let cached
+      try {
+        cached = await getCommitLineStatsDatabase().getLineStats(
+          this.repository.id,
+          unchecked
+        )
+      } catch (e) {
+        log.warn('Failed reading cached commit line stats', e)
+        cached = new Map<string, ICommitLineStats>()
+      }
+      for (const sha of unchecked) {
+        this.lineStatsCacheChecked.add(sha)
+      }
+      for (const [sha, lineStats] of cached) {
+        this.setLineStats(sha, lineStats)
+      }
+    }
+
+    if (generation !== this.lineStatsGeneration) {
+      return
+    }
+    this.lineStatsQueue = wanted.filter(sha => this.needsLineStats(sha))
+    this.lineStatsQueueIndex = 0
+    this.pumpLineStats()
+  }
+
+  private needsLineStats(sha: string) {
+    const commit = this.commitLookup.get(sha)
+    return (
+      commit !== undefined &&
+      commit.lineStats === undefined &&
+      !this.lineStatsInFlight.has(sha) &&
+      !this.lineStatsFailed.has(sha)
+    )
+  }
+
+  /** Hand the next queued commits to whichever workers are free. */
+  private pumpLineStats() {
+    if (this.lineStatsWorkers.length === 0) {
+      const size = Math.max(
+        1,
+        Math.min(LineStatsWorkerCount, navigator.hardwareConcurrency - 1)
+      )
+      for (let i = 0; i < size; i++) {
+        this.lineStatsWorkers.push(
+          new CommitLineStatsWorker(this.repository.path)
+        )
+      }
+    }
+
+    for (const worker of this.lineStatsWorkers) {
+      if (worker.isBusy) {
+        continue
+      }
+      const sha = this.nextQueuedLineStats()
+      if (sha === undefined) {
+        return
+      }
+      this.diffLineStats(worker, sha)
+    }
+  }
+
+  private nextQueuedLineStats(): string | undefined {
+    while (this.lineStatsQueueIndex < this.lineStatsQueue.length) {
+      const sha = this.lineStatsQueue[this.lineStatsQueueIndex++]
+      if (this.needsLineStats(sha)) {
+        return sha
+      }
+    }
+    return undefined
+  }
+
+  private async diffLineStats(worker: CommitLineStatsWorker, sha: string) {
+    const commit = this.commitLookup.get(sha)
+    if (commit === undefined) {
       return
     }
 
-    // Rows arrive one commit at a time; render them in small batches.
-    let emitTimer: number | null = null
-    const flush = () => {
-      if (emitTimer !== null) {
-        window.clearTimeout(emitTimer)
-        emitTimer = null
+    this.lineStatsInFlight.add(sha)
+    try {
+      // Merges are measured against their first parent, like the changeset
+      // view; a root commit has none and is measured against the empty tree.
+      const lineStats = await worker.request(sha, commit.parentSHAs.at(0))
+      if (lineStats === null) {
+        this.lineStatsFailed.add(sha)
+      } else {
+        this.setLineStats(sha, lineStats)
+        this.unsavedLineStats.set(sha, lineStats)
       }
-      this.emitUpdate()
+    } catch (e) {
+      // The stats are decoration; the list stays usable without them. The
+      // worker restarts on its next request, but this commit is not retried
+      // so a commit that crashes git cannot do so in a loop.
+      log.warn('Failed loading commit line stats', e)
+      this.lineStatsFailed.add(sha)
+    } finally {
+      this.lineStatsInFlight.delete(sha)
     }
 
-    try {
-      await streamCommitLineStats(
-        this.repository,
-        missing,
-        (sha, lineStats) => {
-          const commit = this.commitLookup.get(sha)
-          if (commit === undefined) {
-            return
-          }
-          this.commitLookup.set(sha, withLineStats(commit, lineStats))
-          emitTimer ??= window.setTimeout(flush, LineStatsEmitInterval)
-        },
-        request.signal
-      )
-    } catch (e) {
-      // The stats are decoration; the list stays usable without them, and
-      // the next request for these rows tries again.
-      log.warn('Failed loading commit line stats', e)
-    } finally {
-      if (this.lineStatsRequest === request) {
-        this.lineStatsRequest = null
-      }
-      flush()
+    this.pumpLineStats()
+  }
+
+  /** Store a commit's stats, re-rendering after a short batch window. */
+  private setLineStats(sha: string, lineStats: ICommitLineStats) {
+    const commit = this.commitLookup.get(sha)
+    if (commit === undefined) {
+      return
+    }
+    this.commitLookup.set(sha, withLineStats(commit, lineStats))
+    this.lineStatsFlushTimer ??= window.setTimeout(
+      this.flushLineStats,
+      LineStatsEmitInterval
+    )
+  }
+
+  private flushLineStats = () => {
+    this.lineStatsFlushTimer = null
+    this.emitUpdate()
+
+    if (this.unsavedLineStats.size > 0) {
+      const unsaved = this.unsavedLineStats
+      this.unsavedLineStats = new Map()
+      getCommitLineStatsDatabase()
+        .putLineStats(this.repository.id, unsaved)
+        .catch(e => log.warn('Failed caching commit line stats', e))
     }
   }
 

@@ -93,15 +93,14 @@ const CloseToBottomThreshold = 10
 /** Quiet period after the last keystroke before a commit search runs. */
 const CommitSearchDelayMs = 200
 
-/** Quiet period after the list last moved before line stats load. */
-const LineStatsDelayMs = 100
+/**
+ * Quiet period after the list last moved before line stats are reordered.
+ * Reordering is cheap, since running git processes are never restarted.
+ */
+const LineStatsDelayMs = 30
 
-/** Rows above and below the viewport that get line stats too. */
+/** Rows just above and below the viewport, queued right after it. */
 const LineStatsOverscan = 15
-
-/** Rows past the overscan loaded ahead of time, below and above the view. */
-const LineStatsPrefetchBelow = 100
-const LineStatsPrefetchAbove = 30
 
 /** The rows assumed visible until the list first reports its viewport. */
 const InitialVisibleRows = 30
@@ -173,11 +172,11 @@ export class CompareSidebar extends React.Component<
     prevState: ICompareSidebarState
   ) {
     // The list only reports scrolling, so a new set of rows under an
-    // unmoved viewport, or the setting turning on, asks here instead.
+    // unmoved viewport, or the setting changing, asks here instead.
     if (
       listKey(this.getDisplayedCommitSHAs(prevProps, prevState)) !==
         listKey(this.getDisplayedCommitSHAs(this.props, this.state)) ||
-      (this.props.showCommitLineStats && !prevProps.showCommitLineStats)
+      this.props.showCommitLineStats !== prevProps.showCommitLineStats
     ) {
       this.scheduleLineStats()
     }
@@ -429,27 +428,28 @@ export class CompareSidebar extends React.Component<
     }
     this.lineStatsTimer = window.setTimeout(() => {
       this.lineStatsTimer = null
+      const { repository, dispatcher } = this.props
       if (!this.props.showCommitLineStats) {
+        // An empty request stops the work still queued for this list.
+        dispatcher.loadCommitLineStats(repository, [])
         return
       }
-      // One git process streams in this order: the rows on screen, then the
-      // rows below (where scrolling usually goes), then the rows above. The
-      // next request skips whatever this one finished before it was cut off.
+      // Most wanted first: the rows on screen, the rows just below and just
+      // above, then the rest of the loaded list below and above (nearest
+      // first) in the background. Each request replaces the last order.
       const { start, end } = this.visibleRows
       const all = this.getDisplayedCommitSHAs(this.props, this.state)
-      const windowStart = Math.max(0, start - LineStatsOverscan)
-      const windowEnd = end + LineStatsOverscan + 1
+      const visibleEnd = end + 1
+      const nearStart = Math.max(0, start - LineStatsOverscan)
+      const nearEnd = visibleEnd + LineStatsOverscan
       const shas = [
-        ...all.slice(windowStart, windowEnd),
-        ...all.slice(windowEnd, windowEnd + LineStatsPrefetchBelow),
-        ...all.slice(
-          Math.max(0, windowStart - LineStatsPrefetchAbove),
-          windowStart
-        ),
+        ...all.slice(start, visibleEnd),
+        ...all.slice(visibleEnd, nearEnd),
+        ...all.slice(nearStart, start).reverse(),
+        ...all.slice(nearEnd),
+        ...all.slice(0, nearStart).reverse(),
       ]
-      if (shas.length > 0) {
-        this.props.dispatcher.loadCommitLineStats(this.props.repository, shas)
-      }
+      dispatcher.loadCommitLineStats(repository, shas)
     }, LineStatsDelayMs)
   }
 
