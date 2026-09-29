@@ -238,7 +238,6 @@ export class CompareSidebar extends React.Component<
           {branchMode ? this.renderBranchBox() : this.renderCommitSearchBox()}
           <Button
             className="search-mode-toggle"
-            size="small"
             onClick={this.onToggleSearchMode}
             ariaLabel={
               branchMode

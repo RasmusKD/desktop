@@ -63,6 +63,12 @@
           background: var(--list-item-selected-active-badge-background-color);
           color: var(--list-item-selected-active-badge-color);
         }
+        // Green and red lose contrast on the active selection color; the
+        // row's own text color keeps them readable.
+        .line-stats .lines-added,
+        .line-stats .lines-deleted {
+          color: inherit;
+        }
 
         background-color: var(--box-selected-active-background-color);
       }

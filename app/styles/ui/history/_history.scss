@@ -33,21 +33,32 @@
     border-bottom: var(--base-border);
   }
 
+  // The mode toggle joins the field as one control, the way the changes
+  // list's filter options button joins its filter field.
   .search-form {
     display: flex;
-    align-items: center;
-    gap: var(--spacing-half);
+    align-items: stretch;
 
     .fancy-text-box-component {
       flex: 1;
       min-width: 0;
+      border-radius: var(--border-radius) 0 0 var(--border-radius);
     }
 
     .search-mode-toggle {
       flex: 0 0 auto;
-      display: flex;
+      height: auto;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
+      border-radius: 0 var(--border-radius) var(--border-radius) 0;
+      border-left: none;
+      color: var(--text-color);
+
+      &:hover {
+        color: var(--text-secondary-color);
+        background-color: inherit;
+      }
     }
   }
 
