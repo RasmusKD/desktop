@@ -40,7 +40,8 @@ import {
   getBranches,
   deleteRef,
   getCommits,
-  getShallowBoundary,
+  getShallowFilePath,
+  readShallowBoundary,
   streamCommitLineStats,
   merge,
   setRemoteURL,
@@ -123,6 +124,9 @@ export class GitStore extends BaseStore {
 
   /** The line stats load in flight, cancelled by the next one. */
   private lineStatsRequest: AbortController | null = null
+
+  /** Where git keeps the shallow boundary; resolved on first use. */
+  private shallowFilePath: string | null = null
 
   public pullWithRebase?: boolean
 
@@ -698,7 +702,8 @@ export class GitStore extends BaseStore {
 
     let shallow
     try {
-      shallow = await getShallowBoundary(this.repository)
+      this.shallowFilePath ??= await getShallowFilePath(this.repository)
+      shallow = await readShallowBoundary(this.shallowFilePath)
     } catch (e) {
       log.warn('Failed reading the shallow boundary', e)
       return

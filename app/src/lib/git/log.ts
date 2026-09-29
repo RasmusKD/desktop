@@ -315,24 +315,32 @@ function parseLineStatsRecord(
 }
 
 /**
- * The commits at the boundary of a shallow clone. Git has no parents for them
- * and would diff them against the empty tree, so their line counts are wrong.
+ * The absolute path of the repository's shallow file, which exists only while
+ * the clone is shallow. The path is fixed for a repository; its contents are
+ * not, so callers may keep the path but should read the file each time.
  */
-export async function getShallowBoundary(
+export async function getShallowFilePath(
   repository: Repository
-): Promise<ReadonlySet<string>> {
+): Promise<string> {
   const { stdout } = await git(
     ['rev-parse', '--git-path', 'shallow'],
     repository.path,
-    'getShallowBoundary'
+    'getShallowFilePath'
   )
+  return Path.resolve(repository.path, stdout.trim())
+}
 
+/**
+ * The commits at the boundary of a shallow clone, read from the file at
+ * `shallowFilePath`. Git has no parents for them and would diff them against
+ * the empty tree, so their line counts are wrong.
+ */
+export async function readShallowBoundary(
+  shallowFilePath: string
+): Promise<ReadonlySet<string>> {
   let contents
   try {
-    contents = await readFile(
-      Path.resolve(repository.path, stdout.trim()),
-      'utf8'
-    )
+    contents = await readFile(shallowFilePath, 'utf8')
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
       return new Set()
